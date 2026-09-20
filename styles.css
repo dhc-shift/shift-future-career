@@ -113,3 +113,16 @@ button:focus-visible, .career-link:focus-visible { outline:2px solid var(--orang
 .applicant-page .field { margin:20px 0; }
 .field-error { margin:0; min-height:18px; color:var(--orange); font-size:13px; }
 .applicant-page .blind { margin-top:26px; }
+
+/* 코인 결과 팝업 — 가짜 배경 박스 대신 실제 카드로 감싼다 (글자 넘침 방지) */
+.gacha-result:before { display:none; }
+.gacha-result { display:none; }
+.gacha-result-card { width:min(520px,calc(100vw - 40px)); max-height:calc(100vh - 48px); overflow-y:auto; padding:36px 30px 30px; background:#fff; border:5px solid var(--orange); box-shadow:0 22px 70px #0009; text-align:center; }
+.gacha-result-card .result-label { display:block; }
+.gacha-result-card strong { display:block; margin:14px 0 12px; transform:none; width:auto; }
+.gacha-result-card p { margin:0 0 22px; line-height:1.6; }
+.gacha-result-card .gacha-result-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
+@media (max-width:480px) {
+  .gacha-result-card { padding:28px 20px 24px; }
+  .gacha-result-card .gacha-result-actions .button { flex:1 1 100%; }
+}

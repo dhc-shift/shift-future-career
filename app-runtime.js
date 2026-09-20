@@ -1,5 +1,5 @@
 // ?v= 는 캐시 대응입니다. 파일을 고칠 때마다 index.html과 함께 날짜를 올려주세요.
-import { JOBS, buildQuestions } from './question-bank.js?v=20260920b';
+import { JOBS, buildQuestions } from './question-bank.js?v=20260920c';
 
 /* ------------------------------------------------------------------ *
  * 상태
@@ -290,12 +290,14 @@ function gachaScreen() {
         </div>
       </div>
       <div class="gacha-result" style="display:none">
-        <div class="result-label">YOU GOT</div>
-        <strong>◈ ${reward} COINS</strong>
-        <p>Career Shop 코인을 획득했습니다. 코인은 한 번만 지급되며 다시 뽑을 수 없습니다.</p>
-        <div class="gacha-result-actions">
-          <button class="button secondary" data-action="close-reward">나중에 받기</button>
-          <button class="button accent" data-action="claim-coins">코인 받기 →</button>
+        <div class="gacha-result-card">
+          <div class="result-label">YOU GOT</div>
+          <strong>◈ ${reward} COINS</strong>
+          <p>Career Shop 코인을 획득했습니다.<br>코인은 한 번만 지급되며 다시 뽑을 수 없습니다.</p>
+          <div class="gacha-result-actions">
+            <button class="button secondary" data-action="close-reward">나중에 받기</button>
+            <button class="button accent" data-action="claim-coins">코인 받기 →</button>
+          </div>
         </div>
       </div>
     </div>`, { screen: 'gacha' });
@@ -633,9 +635,15 @@ function resumeScreen() {
             </div>`)
           .join('')}
       </div>
+      ${state.submitted
+        ? `<div class="notice-inline submitted-note">제출이 완료되었습니다. ${esc(state.email)} 주소로 지원서를 보내드렸습니다.
+             내용을 고쳐서 다시 제출하면 새 지원서가 한 번 더 발송됩니다.</div>`
+        : ''}
       <div class="actions">
         <button class="button secondary" data-action="back-to-essay">← 내용 수정하기</button>
-        <button class="button accent" data-action="go-applicant">제출하기 →</button>
+        <button class="button ${state.submitted ? 'secondary' : 'accent'}" data-action="go-applicant">
+          ${state.submitted ? '다시 제출하기' : '제출하기 →'}
+        </button>
       </div>
     </main>`, { screen: 'complete' });
 }
@@ -859,7 +867,7 @@ async function submitApplication() {
     state.submitted = true;
     save();
     closeModal();
-    render();
+    go('resume'); // 제출자 정보 화면에 머물러 중복 제출하는 것을 막는다
     openModal(`
       <section class="modal purchase-modal" role="alertdialog" aria-modal="true">
         <div class="eyebrow">SUBMITTED</div>
