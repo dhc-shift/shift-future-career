@@ -126,3 +126,28 @@ button:focus-visible, .career-link:focus-visible { outline:2px solid var(--orang
   .gacha-result-card { padding:28px 20px 24px; }
   .gacha-result-card .gacha-result-actions .button { flex:1 1 100%; }
 }
+
+/* 모바일 레이아웃 보정 — 앞서 선언된 다단 규칙이 미디어 쿼리를 덮어쓰던 문제 해결 */
+@media (max-width:780px) {
+  .shop-page .shop-grid { grid-template-columns:1fr; }
+  .shop-item { min-height:0; gap:16px; padding:20px; }
+  .shop-item-footer { flex-wrap:wrap; gap:12px; }
+  .shop-item-actions { width:100%; justify-content:flex-start; }
+  .shop-item .button.small { width:100%; }
+  .quantity-control { width:100%; justify-content:space-between; }
+  .shop-title-row { display:block; }
+  .shop-title-row .coin-wallet { margin-top:18px; }
+  .shop-page > .actions:after { display:none; }
+  .career-link-grid { grid-template-columns:repeat(2,1fr); }
+  .recruit-strip { flex-direction:column; gap:8px; }
+  .recruit-gift { width:100%; }
+  .gift-card { padding:28px 20px; }
+  .steps { gap:4px; }
+  .step { font-size:10px; }
+}
+
+@media (max-width:480px) {
+  .career-link-grid { grid-template-columns:1fr; }
+  .job-grid { grid-template-columns:1fr; }
+  .category-tab { min-width:0; padding:9px 11px; }
+}

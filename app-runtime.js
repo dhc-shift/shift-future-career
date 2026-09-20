@@ -1,5 +1,5 @@
 // ?v= 는 캐시 대응입니다. 파일을 고칠 때마다 index.html과 함께 날짜를 올려주세요.
-import { JOBS, buildQuestions } from './question-bank.js?v=20260920c';
+import { JOBS, buildQuestions } from './question-bank.js?v=20260920d';
 
 /* ------------------------------------------------------------------ *
  * 상태
