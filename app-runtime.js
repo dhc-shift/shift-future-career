@@ -1,20 +1,15 @@
 // ?v= 는 캐시 대응입니다. 파일을 고칠 때마다 index.html과 함께 날짜를 올려주세요.
-import { JOBS, buildQuestions } from './question-bank.js?v=20260920d';
+import { JOBS, jobsFor, buildQuestions } from './question-bank.js?v=20260922f';
 
 /* ------------------------------------------------------------------ *
  * 상태
  * ------------------------------------------------------------------ */
 
-const STORAGE_KEY = 'future-career-application-v2';
+const STORAGE_KEY = 'future-career-application-v3';
 
 const initialState = {
   screen: 'splash',
-  coins: 0,
-  coinsAwarded: false,
-  pendingReward: null,
   purchased: [],
-  gift: null,
-  giftOpened: false,
   category: 'all',
   companyType: null,
   jobId: null,
@@ -25,14 +20,25 @@ const initialState = {
   name: '',
   studentId: '',
   email: '',
+  consent: false,
   submitted: false,
   savedAt: null
 };
 
-let state = { ...initialState, ...readSaved() };
-let splashTimer = null;
-let revealTimer = null;
+// 초기값을 매번 새로 복사한다. 얕은 복사를 쓰면 답변·경험 목록이 초기값과 같은 객체를 공유해,
+// '처음부터 다시' 뒤에도 이전 답변이 남는 문제가 생긴다.
+const freshState = () => JSON.parse(JSON.stringify(initialState));
+
+let state = { ...freshState(), ...readSaved() };
 let saveIndicatorTimer = null;
+let submitting = false; // B2: 제출 중복 방지
+let pendingChange = null; // X1: 답변이 있을 때 유형·직무 변경 확인용
+
+// 다시 접속하면 마지막 화면으로 바로 들어가지 않고 시작 화면 → 이어하기 화면을 거친다
+if (state.screen !== 'splash') {
+  if (state.screen !== 'welcome') state.lastFlowScreen = state.screen;
+  state.screen = 'splash';
+}
 
 const app = document.querySelector('#app');
 
@@ -73,48 +79,45 @@ const CATEGORIES = [
   ['challenge', '도전'],
   ['global', '글로벌'],
   ['leadership', '리더십'],
-  ['skill', '역량']
+  ['skill', '역량'],
+  ['shift', 'SHIFT']
 ];
 
-// [id, 이름, 카테고리, 설명, 가격, 선행 경험]
+// [id, 이름, 카테고리, 설명]
 const EXPERIENCES = [
-  ['undergrad', '학부연구생', 'academic', '질문을 세우고 검증하는 탐구 경험', 15],
-  ['master', '대학원 석사', 'academic', '전문 분야를 깊게 탐구하는 학업 경험', 20, 'undergrad'],
-  ['minor', '복수전공 / 부전공', 'academic', '관심 분야를 넓혀 연결하는 학업 경험', 12],
-  ['research-project', '연구 프로젝트', 'academic', '팀과 함께 연구 질문을 해결한 경험', 16],
-  ['conference', '논문·학회 발표', 'academic', '연구 결과를 정리하고 공유한 경험', 18, 'research-project'],
-  ['intern', '기업 인턴', 'practical', '조직의 실제 문제를 가까이서 관찰한 경험', 18],
-  ['field-training', '현장실습', 'practical', '현장에서 직무를 직접 경험한 시간', 14],
-  ['company-project', '기업 프로젝트', 'practical', '기업의 실제 과제를 해결한 경험', 21],
-  ['contest-entry', '공모전 참여', 'challenge', '아이디어를 결과물로 만든 첫 도전', 8],
-  ['contest-encourage', '공모전 장려상', 'challenge', '끝까지 완성해 인정받은 도전', 12, 'contest-entry'],
-  ['contest-award', '공모전 우수상', 'challenge', '높은 완성도로 만든 성과', 18, 'contest-encourage'],
-  ['contest-best', '공모전 최우수상', 'challenge', '가장 높은 목표를 향한 도전', 24, 'contest-award'],
-  ['hackathon', '해커톤', 'challenge', '짧은 시간 안에 팀으로 만든 결과', 15],
-  ['startup', '창업 경험', 'challenge', '문제를 발견하고 실행한 경험', 22],
-  ['exchange-us', '교환학생 · 미국·캐나다', 'global', '새로운 환경에서 배우고 적응한 경험', 8],
-  ['exchange-eu', '교환학생 · 유럽', 'global', '다른 문화와 관점 속에서 성장한 경험', 7],
-  ['exchange-asia', '교환학생 · 아시아', 'global', '가까운 이웃 국가에서 확장한 경험', 6],
-  ['overseas-training', '해외연수', 'global', '낯선 환경에서 역량을 키운 경험', 9],
-  ['language', '어학 경험', 'global', '다른 언어로 소통하는 힘', 7],
-  ['club-staff', '동아리 운영진', 'leadership', '사람과 활동을 꾸준히 운영한 경험', 10],
-  ['student-member', '학생회 부원', 'leadership', '공동체의 일원으로 기여한 경험', 7],
-  ['student-deputy', '학생회 차장', 'leadership', '업무를 조율하고 책임진 경험', 10, 'student-member'],
-  ['council', '학생회 국장', 'leadership', '사람과 목표를 연결한 협업 경험', 14, 'student-deputy'],
-  ['student-president', '학생회 회장', 'leadership', '조직 전체의 방향을 책임진 경험', 20, 'council'],
-  ['data', '데이터분석 프로젝트', 'skill', '데이터로 문제를 정의하고 해석한 경험', 16],
-  ['coding', '코딩 프로젝트', 'skill', '기술로 아이디어를 구현한 경험', 17],
-  ['portfolio', '포트폴리오', 'skill', '나의 역량을 결과물로 정리한 경험', 12],
-  ['certificate', '직무 자격증', 'skill', '기초 전문성을 증명하는 준비', 10],
-  ['shift', 'SHIFT 프로그램 기획 경험', 'skill', '사용자 관점에서 프로그램을 설계한 경험', 16]
-];
-
-const GIFTS = [
-  'SHIFT 프로그램 기획 경험',
-  'SHIFT 운영진 경험',
-  'SHIFT IT 온보딩 진행 경험',
-  'SHIFT 헬스케어 기업 탐방 경험',
-  'SHIFT 소모임 진행 경험'
+  ['undergrad', '학부연구생', 'academic', '질문을 세우고 검증하는 탐구 경험'],
+  ['master', '대학원 석사', 'academic', '전문 분야를 깊게 탐구하는 학업 경험'],
+  ['minor', '복수전공 / 부전공', 'academic', '관심 분야를 넓혀 연결하는 학업 경험'],
+  ['research-project', '연구 프로젝트', 'academic', '팀과 함께 연구 질문을 해결한 경험'],
+  ['conference', '논문·학회 발표', 'academic', '연구 결과를 정리하고 공유한 경험'],
+  ['intern', '기업 인턴', 'practical', '조직의 실제 문제를 가까이서 관찰한 경험'],
+  ['field-training', '현장실습', 'practical', '현장에서 직무를 직접 경험한 시간'],
+  ['company-project', '기업 프로젝트', 'practical', '기업의 실제 과제를 해결한 경험'],
+  ['contest-entry', '공모전 참여', 'challenge', '아이디어를 결과물로 만든 첫 도전'],
+  ['contest-encourage', '공모전 장려상', 'challenge', '끝까지 완성해 인정받은 도전'],
+  ['contest-award', '공모전 우수상', 'challenge', '높은 완성도로 만든 성과'],
+  ['contest-best', '공모전 최우수상', 'challenge', '가장 높은 목표를 향한 도전'],
+  ['hackathon', '해커톤', 'challenge', '짧은 시간 안에 팀으로 만든 결과'],
+  ['startup', '창업 경험', 'challenge', '문제를 발견하고 실행한 경험'],
+  ['exchange-us', '교환학생 · 미국·캐나다', 'global', '새로운 환경에서 배우고 적응한 경험'],
+  ['exchange-eu', '교환학생 · 유럽', 'global', '다른 문화와 관점 속에서 성장한 경험'],
+  ['exchange-asia', '교환학생 · 아시아', 'global', '가까운 이웃 국가에서 확장한 경험'],
+  ['overseas-training', '해외연수', 'global', '낯선 환경에서 역량을 키운 경험'],
+  ['language', '어학 경험', 'global', '다른 언어로 소통하는 힘'],
+  ['club-staff', '동아리 운영진', 'leadership', '사람과 활동을 꾸준히 운영한 경험'],
+  ['student-member', '학생회 부원', 'leadership', '공동체의 일원으로 기여한 경험'],
+  ['student-deputy', '학생회 차장', 'leadership', '업무를 조율하고 책임진 경험'],
+  ['council', '학생회 국장', 'leadership', '사람과 목표를 연결한 협업 경험'],
+  ['student-president', '학생회 회장', 'leadership', '조직 전체의 방향을 책임진 경험'],
+  ['data', '데이터분석 프로젝트', 'skill', '데이터로 문제를 정의하고 해석한 경험'],
+  ['coding', '코딩 프로젝트', 'skill', '기술로 아이디어를 구현한 경험'],
+  ['portfolio', '포트폴리오', 'skill', '나의 역량을 결과물로 정리한 경험'],
+  ['certificate', '직무 자격증', 'skill', '기초 전문성을 증명하는 준비'],
+  ['shift-planning', 'SHIFT 프로그램 기획 경험', 'shift', '사용자 관점에서 프로그램을 설계한 경험'],
+  ['shift-staff', 'SHIFT 운영진 경험', 'shift', '동아리 운영을 책임지고 사람을 조율한 경험'],
+  ['shift-onboarding', 'SHIFT IT 온보딩 진행 경험', 'shift', '선후배에게 기술과 진로를 나눈 경험'],
+  ['shift-visit', 'SHIFT 헬스케어 기업 탐방 경험', 'shift', '산업 현장을 직접 보고 배운 경험'],
+  ['shift-study', 'SHIFT 소모임 진행 경험', 'shift', '함께 공부하는 모임을 꾸준히 이끈 경험']
 ];
 
 const ORG_LINKS = {
@@ -133,9 +136,7 @@ const ORG_LINKS = {
 
 // 화면 순서 — 진행 표시와 뒤로 가기에 함께 사용
 const FLOW = [
-  ['gacha', '코인 뽑기'],
-  ['shop', '경험 상점'],
-  ['mystery', 'SHIFT 선물'],
+  ['shop', '경험 담기'],
   ['type', '지원 유형'],
   ['job', '지원 직무'],
   ['org', '지원 기업'],
@@ -143,12 +144,32 @@ const FLOW = [
   ['complete', '완료']
 ];
 
+const ANSWER_LIMIT = 1000;
+
+const SCREEN_NAMES = {
+  ...Object.fromEntries(FLOW),
+  resume: '이력서 확인',
+  applicant: '제출자 정보'
+};
+
 const findExperience = (id) => EXPERIENCES.find((item) => item[0] === id);
 const experienceLabels = () => state.purchased.map((id) => findExperience(id)?.[1]).filter(Boolean);
 const jobLabel = () => JOBS.find((job) => job.id === state.jobId)?.label || '미선택';
 const typeLabel = () => (state.companyType === 'public' ? '공기업·공공기관' : '사기업');
 const currentQuestions = () => state.questions || [];
-const hasProgress = () => state.coinsAwarded || state.purchased.length > 0 || Object.keys(state.answers).length > 0;
+const answeredIn = (companyType, jobId) =>
+  companyType && jobId
+    ? buildQuestions(companyType, jobId).filter((q) => (state.answers[q.id] || '').trim()).length
+    : 0;
+
+// 화면을 다시 그리되 스크롤 위치는 유지 (같은 화면에서 선택만 바뀔 때)
+function rerenderInPlace() {
+  const y = window.scrollY;
+  render();
+  window.scrollTo({ top: y });
+}
+
+const hasProgress = () => state.purchased.length > 0 || Boolean(state.companyType) || Object.keys(state.answers).length > 0;
 
 /* ------------------------------------------------------------------ *
  * 공통 화면 요소
@@ -195,10 +216,7 @@ function backButton(action, label) {
 const SCREENS = {
   splash: splashScreen,
   welcome: welcomeScreen,
-  gacha: gachaScreen,
   shop: shopScreen,
-  mystery: mysteryScreen,
-  recruit: recruitScreen,
   type: typeScreen,
   job: jobScreen,
   org: orgScreen,
@@ -217,24 +235,21 @@ function render() {
 
 function splashScreen() {
   app.innerHTML = `
-    <div class="splash-screen" data-action="skip-splash">
+    <div class="splash-screen" data-action="skip-splash" role="button" tabindex="0" aria-label="화면을 눌러 시작하기">
       <div class="splash-mark">
         <div class="splash-kicker">MY FUTURE, MY SHIFT</div>
         <div class="splash-logo">FUTURE <span>RESUME</span></div>
         <p>나의 경험을 미래의 지원서로</p>
+        <div class="splash-start">화면을 눌러 시작하기</div>
       </div>
     </div>`;
-  if (splashTimer) return;
-  splashTimer = setTimeout(() => {
-    splashTimer = null;
-    go(hasProgress() ? 'welcome' : 'gacha');
-  }, 1500);
+  document.querySelector('.splash-screen')?.focus();
 }
 
 // 재접속했을 때 이어할지 처음부터 할지 고르는 화면
 function welcomeScreen() {
-  const answered = Object.values(state.answers).filter((text) => text && text.trim()).length;
-  const stepName = FLOW.find(([id]) => id === state.lastFlowScreen)?.[1] || '경험 상점';
+  const answered = answeredIn(state.companyType, state.jobId);
+  const stepName = SCREEN_NAMES[state.lastFlowScreen] || '경험 담기';
   app.innerHTML = header(`
     <main class="welcome-page">
       <div class="eyebrow">WELCOME BACK</div>
@@ -242,8 +257,8 @@ function welcomeScreen() {
       <p class="lead">이전에 작성하던 내용이 이 브라우저에 저장되어 있습니다.</p>
       <div class="welcome-summary">
         <div><span>마지막 단계</span><strong>${esc(stepName)}</strong></div>
-        <div><span>보유 코인</span><strong>${state.coins} COINS</strong></div>
-        <div><span>선택한 경험</span><strong>${state.purchased.length}개</strong></div>
+        <div><span>담은 경험</span><strong>${state.purchased.length}개</strong></div>
+        <div><span>지원 직무</span><strong>${esc(state.jobId ? jobLabel() : '미선택')}</strong></div>
         <div><span>작성한 문항</span><strong>${answered}개</strong></div>
       </div>
       <div class="actions">
@@ -254,92 +269,29 @@ function welcomeScreen() {
     </main>`, { screen: 'welcome' });
 }
 
-function gachaScreen() {
-  if (state.pendingReward === null) {
-    state.pendingReward = Math.floor(Math.random() * 31) + 40;
-    save();
-  }
-  const reward = state.pendingReward;
-  const claimed = state.coinsAwarded;
-
-  app.innerHTML = header(`
-    <div class="gacha-screen${claimed ? ' complete' : ''}">
-      <div class="gacha-copy">
-        <div class="splash-kicker">SHIFT LUCKY DROP</div>
-        <h1>오늘의 미래 코인을 <span>뽑아보세요.</span></h1>
-        <p>가챠 머신이 첫 Career Shop 코인을 준비하고 있습니다.</p>
-      </div>
-      <div class="gacha-machine">
-        <div class="machine-top"><span></span><span></span><span></span><span></span><span></span></div>
-        <div class="machine-glass">
-          <i class="capsule capsule-one"></i><i class="capsule capsule-two"></i><i class="capsule capsule-three"></i>
-          <i class="capsule capsule-four"></i><i class="capsule capsule-five"></i><i class="winning-capsule">◈</i>
-        </div>
-        <div class="machine-base">
-          <div class="machine-label">FUTURE<br>RESUME</div>
-          <div class="machine-slot"></div>
-          <div class="machine-knob"></div>
-        </div>
-      </div>
-      <div class="gacha-status">
-        <span class="status-shuffle">CAPSULES SHUFFLING · · ·</span>
-        <span class="status-reveal">YOUR CAPSULE IS READY</span>
-        <strong class="gacha-reward">◈ ${reward}</strong>
-        <div class="gacha-actions">
-          <button class="button accent" data-action="claim-coins">코인 받기 →</button>
-        </div>
-      </div>
-      <div class="gacha-result" style="display:none">
-        <div class="gacha-result-card">
-          <div class="result-label">YOU GOT</div>
-          <strong>◈ ${reward} COINS</strong>
-          <p>Career Shop 코인을 획득했습니다.<br>코인은 한 번만 지급되며 다시 뽑을 수 없습니다.</p>
-          <div class="gacha-result-actions">
-            <button class="button secondary" data-action="close-reward">나중에 받기</button>
-            <button class="button accent" data-action="claim-coins">코인 받기 →</button>
-          </div>
-        </div>
-      </div>
-    </div>`, { screen: 'gacha' });
-
-  if (claimed) return;
-  clearTimeout(revealTimer);
-  revealTimer = setTimeout(() => {
-    document.querySelector('.gacha-screen')?.classList.add('complete');
-    const result = document.querySelector('.gacha-result');
-    if (result) result.style.display = 'grid';
-  }, 4300);
-}
-
 function shopScreen() {
   const visible = EXPERIENCES.filter((item) => state.category === 'all' || item[2] === state.category);
-  const tabs = CATEGORIES.map(
-    ([id, label]) => `<button class="category-tab ${state.category === id ? 'active' : ''}" data-category="${id}">${label}</button>`
-  ).join('');
+  const tabs = CATEGORIES.map(([id, label]) => {
+    const count = id === 'all'
+      ? state.purchased.length
+      : state.purchased.filter((pid) => findExperience(pid)?.[2] === id).length;
+    return `<button class="category-tab ${state.category === id ? 'active' : ''}" data-category="${id}">${label}${count ? ` <b>${count}</b>` : ''}</button>`;
+  }).join('');
 
   const cards = visible
-    .map(([id, label, category, detail, cost, requires]) => {
-      const ownedCount = state.purchased.filter((item) => item === id).length;
-      const prerequisite = requires ? findExperience(requires)?.[1] : '';
-      const locked = Boolean(requires) && !state.purchased.includes(requires);
-      const controls = ownedCount
-        ? `<div class="quantity-control">
-             <button class="quantity-button" data-decrease="${id}" aria-label="${esc(label)} 수량 줄이기">−</button>
-             <span class="owned-label">${ownedCount}개 보유</span>
-             <button class="quantity-button" data-increase="${id}" aria-label="${esc(label)} 수량 늘리기">+</button>
-           </div>`
-        : `<button class="button small" data-buy="${id}" ${state.coins < cost || locked ? 'disabled' : ''}>${locked ? '잠김' : '구매하기'}</button>`;
+    .map(([id, label, category, detail]) => {
+      const picked = state.purchased.includes(id);
       return `
-        <article class="shop-item ${ownedCount ? 'owned' : ''} ${locked ? 'locked' : ''}">
+        <article class="shop-item ${picked ? 'owned' : ''}">
           <div>
             <div class="mono">${CATEGORIES.find((item) => item[0] === category)?.[1] || 'CAREER EXPERIENCE'}</div>
             <h3>${label}</h3>
             <p>${detail}</p>
-            ${locked ? `<div class="prerequisite">${prerequisite} 경험이 먼저 필요합니다</div>` : ''}
           </div>
           <div class="shop-item-footer">
-            <span class="coin-cost">${cost} COINS</span>
-            <div class="shop-item-actions">${controls}</div>
+            <button class="button small ${picked ? 'picked' : ''}" data-toggle="${id}" aria-pressed="${picked}">
+              ${picked ? '✓ 담았어요' : '+ 담기'}
+            </button>
           </div>
         </article>`;
     })
@@ -352,86 +304,22 @@ function shopScreen() {
       <div class="shop-title-row">
         <div>
           <h1>EXPERIENCE STORE</h1>
-          <p class="lead">미래의 나를 상상하며, 필요한 경험을 하나씩 구매해보세요.</p>
+          <p class="lead">졸업할 때의 나를 상상하며, 대학생활 동안 쌓고 싶은 경험을 모두 담아보세요.</p>
         </div>
         <div class="coin-wallet">
-          <span>MY COINS</span>
-          <strong>${state.coins} COINS</strong>
-          <small>선택한 경험 ${total}개</small>
+          <span>MY CAREER</span>
+          <strong>${total}개 담음</strong>
+          <small>다시 누르면 빠집니다</small>
         </div>
       </div>
       <div class="category-tabs">${tabs}</div>
       <div class="shop-grid">${cards}</div>
       <div class="actions">
         <button class="button accent" data-action="finish-shop" ${total ? '' : 'disabled'}>
-          ${total ? '지원하러 가기 →' : '경험을 1개 이상 선택하세요'}
+          ${total ? '지원하러 가기 →' : '경험을 1개 이상 담아주세요'}
         </button>
       </div>
     </main>`, { screen: 'shop' });
-}
-
-function mysteryScreen() {
-  const stage = state.giftOpened
-    ? `<section class="mystery-reveal">
-         <div class="reward-decor reward-decor-left"></div>
-         <div class="reward-decor reward-decor-right"></div>
-         <div class="eyebrow">CONGRATULATIONS!</div>
-         <h2>축하합니다!</h2>
-         <div class="reward-highlight">${esc(state.gift || '')} 당첨!</div>
-         <p>SHIFT가 당신의 대학생활을 응원합니다. 새로운 경험이 MY CAREER에 추가되었습니다.</p>
-         <div class="actions center-actions">
-           ${backButton('back-to-shop', '경험 더 고르기')}
-           <button class="button accent" data-action="confirm-gift">지원 시작하기 →</button>
-         </div>
-       </section>`
-    : `<section class="mystery-gift-stage">
-         <div class="side-note note-left">SHIFT가 준비한<br>특별한 경험!</div>
-         <div class="mystery-decor decor-one"></div>
-         <div class="mystery-decor decor-two"></div>
-         <div class="gift-illustration"><img src="mystery-box.png" alt="SHIFT Mystery Box 선물상자"></div>
-         <div class="side-note note-right">A SMALL GIFT<br>BY SHIFT</div>
-         <button class="button accent mystery-cta" data-action="open-gift">선물 열어보기</button>
-       </section>`;
-
-  app.innerHTML = header(`
-    <main class="mystery-page">
-      <div class="eyebrow">SHIFT MYSTERY BOX</div>
-      <h1><span>SHIFT</span> MYSTERY GIFT</h1>
-      <p class="lead">구매한 경험과는 별개로, SHIFT의 랜덤 보너스를 확인해보세요.</p>
-      ${stage}
-      <section class="mystery-info-card">
-        <div><span>MY EXPERIENCE</span><strong>${state.purchased.length}개 보유</strong></div>
-        <div><span>SHIFT BONUS</span><strong>${state.giftOpened ? '1개' : '확인 전'}</strong></div>
-        <div class="mystery-tip">
-          <span>TIP</span>
-          <p>SHIFT Mystery Box에서는 구매한 경험과는 다른 특별한 경험이 지급됩니다.</p>
-        </div>
-      </section>
-    </main>`, { screen: 'mystery' });
-}
-
-function recruitScreen() {
-  app.innerHTML = header(`
-    <main class="recruit-page">
-      <div class="recruit-hero">
-        <div class="eyebrow">RECRUIT / FUTURE CAREER</div>
-        <h1>미래를 함께 만들어갈 <span>인재를 기다립니다.</span></h1>
-        <p>이제 경험을 지원 직무와 연결하고, 나만의 미래 지원서를 시작해보세요.</p>
-        <div class="recruit-gift">
-          <span class="badge">SPECIAL GIFT</span>
-          <strong>${esc(state.gift || 'SHIFT 보너스 경험')}</strong>
-          <span>SHIFT가 당신의 대학생활을 응원합니다.</span>
-        </div>
-        <div class="actions">
-          ${backButton('mystery', 'SHIFT 선물 다시 보기')}
-          <button class="button accent" data-action="type">지원 유형 고르기 →</button>
-        </div>
-      </div>
-      <div class="recruit-strip">
-        <span>YOUR EXPERIENCE</span>
-        <strong>경험을 선택했다면, 이제 지원할 미래를 고릅니다.</strong>
-      </div>
-    </main>`, { screen: 'type' });
 }
 
 function typeScreen() {
@@ -453,12 +341,12 @@ function typeScreen() {
           <button class="button" data-type="public">공기업·공공기관 지원하기 →</button>
         </article>
       </div>
-      <div class="actions">${backButton('back-to-mystery', 'SHIFT 선물로')}</div>
+      <div class="actions">${backButton('back-to-shop', '경험 다시 담기')}</div>
     </main>`, { screen: 'type' });
 }
 
 function jobScreen() {
-  const list = state.companyType === 'public' ? JOBS : [...JOBS].sort((a, b) => Number(a.public) - Number(b.public));
+  const list = jobsFor(state.companyType);
   app.innerHTML = header(`
     <main>
       <div class="eyebrow">JOB CATEGORY</div>
@@ -468,7 +356,7 @@ function jobScreen() {
         ${list
           .map(
             (job) => `<button class="job ${job.id === state.jobId ? 'selected' : ''}" data-job="${job.id}" aria-pressed="${job.id === state.jobId}">
-              <strong>${job.label}</strong>${job.public ? '<small>공공기관 지원 가능</small>' : ''}
+              <strong>${job.label}</strong>
             </button>`
           )
           .join('')}
@@ -526,7 +414,9 @@ function orgScreen() {
 }
 
 function essayScreen() {
-  const questions = state.questions?.length ? state.questions : buildQuestions(state.companyType, state.jobId);
+  const questions = state.questions?.length
+    ? state.questions
+    : buildQuestions(state.companyType, state.jobId, state.organization);
   state.questions = questions;
   const index = Math.min(state.questionIndex, questions.length - 1);
   state.questionIndex = index;
@@ -549,12 +439,18 @@ function essayScreen() {
           .join('')}
       </div>
       <div class="essay-context mono">${esc(typeLabel())} · ${esc(jobLabel())} · ${esc(state.organization || '미입력')}</div>
-      <h2>${question.question}</h2>
-      <div class="guide">작성 구조: ${question.writingGuide}</div>
-      <textarea id="answer" maxlength="700" placeholder="나의 경험과 생각을 직접 작성해보세요.">${esc(answer)}</textarea>
+      <section class="question-card">
+        <div class="question-label mono">QUESTION ${index + 1}</div>
+        <h2 class="question-text">${esc(question.question)}</h2>
+        <div class="guide-steps">
+          <span class="guide-steps-label">작성 순서</span>
+          <ol>${question.writingGuide.split('→').map((step) => `<li>${esc(step.trim())}</li>`).join('')}</ol>
+        </div>
+      </section>
+      <textarea id="answer" class="${answer.length >= ANSWER_LIMIT ? 'at-limit' : ''}" placeholder="나의 경험과 생각을 직접 작성해보세요.">${esc(answer)}</textarea>
       <div class="essay-status">
         <span class="save-indicator" id="save-indicator" aria-live="polite">작성 중인 내용은 이 브라우저에 자동 저장됩니다</span>
-        <span class="counter"><span id="count">${answer.length}</span> / 700</span>
+        <span class="counter ${answer.length >= ANSWER_LIMIT ? 'at-limit' : ''}" id="counter"><span id="count">${answer.length}</span> / ${ANSWER_LIMIT}</span>
       </div>
       <div class="actions">
         ${index === 0 ? backButton('back-to-org', '지원 기업 수정') : '<button class="button secondary" data-action="previous">← 이전 문항</button>'}
@@ -563,13 +459,41 @@ function essayScreen() {
     </main>`, { screen: 'essay' });
 
   const textarea = document.querySelector('#answer');
-  textarea?.addEventListener('input', (event) => {
-    state.answers[question.id] = event.target.value;
+  if (!textarea) return;
+
+  // 제한 글자수에 닿으면 더 입력되지 않게 막고, 글자수를 붉게 표시한다.
+  // 한글은 조합 중에는 글자를 자르지 않고, 조합이 끝난 뒤에 잘라낸다.
+  const commit = () => {
+    if (textarea.value.length > ANSWER_LIMIT) {
+      const caret = Math.min(textarea.selectionStart, ANSWER_LIMIT);
+      textarea.value = textarea.value.slice(0, ANSWER_LIMIT);
+      textarea.setSelectionRange(caret, caret);
+    }
+    state.answers[question.id] = textarea.value;
     save();
-    const counter = document.querySelector('#count');
-    if (counter) counter.textContent = String(event.target.value.length);
+    updateCounter(textarea);
     showSaved();
+  };
+
+  textarea.addEventListener('beforeinput', (event) => {
+    const inserting = event.inputType.startsWith('insert') && !event.isComposing;
+    const hasSelection = textarea.selectionStart !== textarea.selectionEnd;
+    if (inserting && !hasSelection && textarea.value.length >= ANSWER_LIMIT) event.preventDefault();
   });
+  textarea.addEventListener('input', (event) => {
+    if (event.isComposing) return updateCounter(textarea);
+    commit();
+  });
+  textarea.addEventListener('compositionend', commit);
+}
+
+function updateCounter(textarea) {
+  const length = Math.min(textarea.value.length, ANSWER_LIMIT);
+  const full = textarea.value.length >= ANSWER_LIMIT;
+  const count = document.querySelector('#count');
+  if (count) count.textContent = String(length);
+  document.querySelector('#counter')?.classList.toggle('at-limit', full);
+  textarea.classList.toggle('at-limit', full);
 }
 
 function showSaved() {
@@ -595,7 +519,7 @@ function completeScreen() {
           <div><span>지원 유형</span><strong>${esc(typeLabel())}</strong></div>
           <div><span>지원 직무</span><strong>${esc(jobLabel())}</strong></div>
           <div><span>지원 기업·기관</span><strong>${esc(state.organization || '미입력')}</strong></div>
-          <div><span>연결한 경험</span><strong>${state.purchased.length}개 + SHIFT 보너스</strong></div>
+          <div><span>담은 경험</span><strong>${state.purchased.length}개</strong></div>
         </div>
         ${missing.length
           ? `<div class="notice-inline">아직 작성하지 않은 문항이 ${missing.length}개 있습니다. 지금 이어서 작성할 수 있습니다.</div>`
@@ -619,18 +543,17 @@ function resumeScreen() {
       <div class="resume-panel">
         <div><span>APPLICATION STATUS</span><strong>${state.submitted ? '제출 완료' : '작성 완료'}</strong></div>
         <div><span>SELECTED JOB</span><strong>${esc(jobLabel())}</strong></div>
-        <div><span>CAREER EXPERIENCE</span><strong>${labels.length}개 + SHIFT 보너스</strong></div>
+        <div><span>CAREER EXPERIENCE</span><strong>${labels.length}개</strong></div>
       </div>
       <div class="tags">
         ${unique.map((label) => `<span class="tag">#${esc(label)}</span>`).join('')}
-        ${state.gift ? `<span class="tag">#${esc(state.gift)}</span>` : ''}
       </div>
       <div class="review">
         ${questions
           .map((question, i) => `
             <div class="review-item">
               <div class="mono">Q${i + 1}</div>
-              <h3>${question.question}</h3>
+              <h3>${esc(question.question)}</h3>
               <p>${esc(state.answers[question.id] || '미작성')}</p>
             </div>`)
           .join('')}
@@ -652,8 +575,9 @@ function resumeScreen() {
 
 const APPLICANT_RULES = {
   name: (value) => (value.trim().length >= 2 ? '' : '이름을 두 글자 이상 입력해주세요.'),
-  studentId: (value) => (/^\d{6,10}$/.test(value.trim()) ? '' : '학번을 숫자로 입력해주세요.'),
-  email: (value) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? '' : '받으실 이메일 주소를 정확히 입력해주세요.')
+  studentId: (value) => (/^\d{10}$/.test(value.trim()) ? '' : '학번 10자리를 숫자로 입력해주세요.'),
+  email: (value) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? '' : '받으실 이메일 주소를 정확히 입력해주세요.'),
+  consent: (value) => (value === true ? '' : '개인정보 수집·이용에 동의해주세요.')
 };
 
 const applicantErrors = () =>
@@ -664,7 +588,7 @@ const applicantErrors = () =>
 function applicantScreen() {
   const fields = [
     ['name', '이름', '예: 김시프트', 'text', 'name'],
-    ['studentId', '학번', '예: 25012345', 'text', 'off'],
+    ['studentId', '학번', '예: 2025123456 (10자리)', 'text', 'off'],
     ['email', '이메일', '예: shift@example.com', 'email', 'email']
   ];
   const ready = applicantErrors().length === 0;
@@ -679,7 +603,7 @@ function applicantScreen() {
           ([field, label, placeholder, type, autocomplete]) => `
         <div class="field">
           <label for="${field}">${label} <span class="required">필수</span></label>
-          <input id="${field}" type="${type}" value="${esc(state[field] || '')}" placeholder="${placeholder}" autocomplete="${autocomplete}" data-field="${field}">
+          <input id="${field}" type="${type}" value="${esc(state[field] || '')}" placeholder="${placeholder}" autocomplete="${autocomplete}" data-field="${field}"${field === 'studentId' ? ' inputmode="numeric" maxlength="10"' : ''}>
           <p class="field-error" id="${field}-error"></p>
         </div>`
         )
@@ -688,6 +612,10 @@ function applicantScreen() {
         <strong>개인정보 안내</strong>
         입력하신 이름·학번·이메일은 제출 확인과 마일리지 지급에만 사용하며, SHIFT 운영진만 확인합니다.
       </div>
+      <label class="consent">
+        <input type="checkbox" id="consent" ${state.consent ? 'checked' : ''}>
+        <span>위 목적으로 이름·학번·이메일을 수집·이용하는 데 동의합니다. <em>(필수)</em></span>
+      </label>
       <div class="actions">
         <button class="button secondary" data-action="future-resume">← 작성 내용 다시 보기</button>
         <button class="button accent" data-action="submit-application" ${ready ? '' : 'disabled'}>제출하기 →</button>
@@ -705,6 +633,13 @@ function applicantScreen() {
       const submitButton = document.querySelector('[data-action="submit-application"]');
       if (submitButton) submitButton.disabled = applicantErrors().length > 0;
     });
+  });
+
+  document.querySelector('#consent')?.addEventListener('change', (event) => {
+    state.consent = event.target.checked;
+    save();
+    const submitButton = document.querySelector('[data-action="submit-application"]');
+    if (submitButton) submitButton.disabled = applicantErrors().length > 0;
   });
 }
 
@@ -729,38 +664,23 @@ function showNotice(message) {
     </section>`);
 }
 
-// 구매·환불처럼 연속으로 일어나는 동작은 모달 대신 토스트로 알린다
-let toastTimer = null;
-function showToast(message) {
-  document.querySelector('.toast')?.remove();
-  app.insertAdjacentHTML('beforeend', `<div class="toast" role="status" aria-live="polite">${esc(message)}</div>`);
-  const toast = document.querySelector('.toast');
-  requestAnimationFrame(() => toast?.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toast?.classList.remove('show');
-    setTimeout(() => toast?.remove(), 250);
-  }, 2000);
-}
-
-function confirmDialog({ eyebrow, title, detail, cost, confirmLabel, cancelLabel, action, id }) {
+function confirmDialog({ eyebrow, title, detail, confirmLabel, cancelLabel, action }) {
   openModal(`
     <section class="modal purchase-modal" role="dialog" aria-modal="true">
       <div class="eyebrow">${eyebrow}</div>
       <h2>${esc(title)}</h2>
-      ${cost ? `<div class="purchase-cost">${cost}</div>` : ''}
       <p>${detail}</p>
       <div class="actions">
         <button class="button secondary" data-action="close-modal">${cancelLabel}</button>
-        <button class="button accent" data-action="${action}" data-id="${id || ''}">${confirmLabel}</button>
+        <button class="button accent" data-action="${action}">${confirmLabel}</button>
       </div>
     </section>`);
 }
 
 function openCareerReview() {
   const labels = experienceLabels();
-  const rows = [...new Set(labels)]
-    .map((label) => `<li><span>${esc(label)}</span><strong>${labels.filter((item) => item === label).length}개</strong></li>`)
+  const rows = labels
+    .map((label) => `<li><span>${esc(label)}</span><strong>✓</strong></li>`)
     .join('');
   openModal(`
     <section class="modal career-review-panel" role="dialog" aria-modal="true">
@@ -771,48 +691,9 @@ function openCareerReview() {
         </div>
         <button class="career-close-button" data-action="close-modal">닫기</button>
       </div>
-      <p>Career Shop에서 구매한 경험과 SHIFT 보너스를 확인할 수 있습니다.</p>
-      <ul class="career-review-list">${rows || '<li><span>구매한 경험이 없습니다.</span></li>'}</ul>
-      ${state.gift ? `<div class="career-bonus"><span>SHIFT BONUS</span><strong>${esc(state.gift)}</strong></div>` : ''}
+      <p>경험 상점에서 담은 경험입니다. 자기소개서를 쓸 때 참고하세요.</p>
+      <ul class="career-review-list">${rows || '<li><span>담은 경험이 없습니다.</span></li>'}</ul>
     </section>`, 'career-review-modal');
-}
-
-/* ------------------------------------------------------------------ *
- * 구매 처리
- * ------------------------------------------------------------------ */
-
-function buy(item) {
-  const [id, label, , , cost, requires] = item;
-  if (requires && !state.purchased.includes(requires)) {
-    showNotice(`${findExperience(requires)?.[1]} 경험이 먼저 필요합니다.`);
-    return;
-  }
-  if (state.coins < cost) {
-    showNotice(`코인이 부족합니다. ${label} 구매에는 ${cost} COINS가 필요합니다.`);
-    return;
-  }
-  state.coins -= cost;
-  state.purchased.push(id);
-  save();
-  render();
-  showToast(`${label} · ${cost} COINS 구매 완료`);
-}
-
-function refund(item, { notify = true } = {}) {
-  const [id, label, , , cost] = item;
-  const index = state.purchased.lastIndexOf(id);
-  if (index < 0) return;
-  // 선행 경험을 취소하면 그 경험을 필요로 하는 항목도 함께 정리한다
-  const stillOwned = state.purchased.filter((entry) => entry === id).length - 1;
-  if (!stillOwned) {
-    const dependents = EXPERIENCES.filter((entry) => entry[5] === id && state.purchased.includes(entry[0]));
-    dependents.forEach((dependent) => refund(dependent, { notify: false }));
-  }
-  state.purchased.splice(index, 1);
-  state.coins += cost;
-  save();
-  render();
-  if (notify) showToast(`${label} 취소 · ${cost} COINS 환불`);
 }
 
 /* ------------------------------------------------------------------ *
@@ -836,23 +717,23 @@ function submissionPayload() {
     companyType: typeLabel(),
     job: jobLabel(),
     organization: state.organization,
-    experiences: [...new Set(experienceLabels())],
-    skills: [...new Set(state.purchased.filter((id) => skillIds.includes(id)).map((id) => findExperience(id)[1]))],
-    gift: state.gift || '',
-    coins: state.coins,
+    experiences: experienceLabels(),
+    skills: state.purchased.filter((id) => skillIds.includes(id)).map((id) => findExperience(id)[1]),
     questions
   };
 }
 
 async function submitApplication() {
   if (!SUBMIT_ENDPOINT) return submitByMail();
+  if (submitting) return;
+  submitting = true;
 
   openModal(`
-    <section class="modal purchase-modal" role="alertdialog" aria-modal="true">
+    <section class="modal purchase-modal" role="alertdialog" aria-modal="true" aria-busy="true">
       <div class="eyebrow">SUBMITTING</div>
       <h2>제출하는 중입니다</h2>
-      <p>잠시만 기다려주세요. 작성하신 지원서를 PDF로 만들어 메일로 보내드립니다.</p>
-    </section>`);
+      <p>잠시만 기다려주세요. 작성하신 지원서를 PDF로 만들어 메일로 보내드립니다. 10초 정도 걸릴 수 있으니 창을 닫지 말아주세요.</p>
+    </section>`, 'locked');
 
   try {
     const response = await fetch(SUBMIT_ENDPOINT, {
@@ -887,6 +768,8 @@ async function submitApplication() {
           <button class="button accent" data-action="retry-submit">다시 시도</button>
         </div>
       </section>`);
+  } finally {
+    submitting = false;
   }
 }
 
@@ -902,7 +785,6 @@ function submitByMail() {
     `지원 기업·기관: ${payload.organization || '미입력'}`,
     `지원 직무: ${payload.job}`,
     `선택한 경험: ${payload.experiences.join(', ') || '없음'}`,
-    `SHIFT 보너스: ${payload.gift || '없음'}`,
     '',
     'APPLICATION ESSAY'
   ];
@@ -914,13 +796,12 @@ function submitByMail() {
   const body = encodeURIComponent(lines.join(String.fromCharCode(10)));
   const url = `https://mail.google.com/mail/?view=cm&fs=1&to=shiftysdh@gmail.com&su=${encodeURIComponent(subject)}&body=${body}`;
   const opened = window.open(url, '_blank');
-  state.submitted = true;
-  save();
   if (!opened) {
     showNotice('팝업이 차단되어 메일 창을 열지 못했습니다. 브라우저의 팝업 차단을 해제한 뒤 다시 시도해주세요.');
     return;
   }
-  render();
+  // 메일 창만 연 상태라 실제 발송 여부를 알 수 없으므로 '제출 완료'로 표시하지 않는다
+  showNotice('메일 작성 창을 열었습니다. 메일에서 보내기를 눌러야 제출이 완료됩니다.');
 }
 
 /* ------------------------------------------------------------------ *
@@ -928,22 +809,21 @@ function submitByMail() {
  * ------------------------------------------------------------------ */
 
 const ACTIONS = {
-  'skip-splash': () => {
-    clearTimeout(splashTimer);
-    splashTimer = null;
-    go(hasProgress() ? 'welcome' : 'gacha');
-  },
+  'skip-splash': () => go(hasProgress() ? 'welcome' : 'shop'),
   home: () => {
     if (!hasProgress()) return go('splash');
-    state.lastFlowScreen = state.screen;
+    if (!['welcome', 'splash'].includes(state.screen)) state.lastFlowScreen = state.screen;
     go('welcome');
   },
-  continue: () => go(state.lastFlowScreen && SCREENS[state.lastFlowScreen] ? state.lastFlowScreen : 'shop'),
+  continue: () => {
+    const target = state.lastFlowScreen;
+    go(target && SCREENS[target] && !['welcome', 'splash'].includes(target) ? target : 'shop');
+  },
   restart: () =>
     confirmDialog({
       eyebrow: 'RESTART',
       title: '처음부터 다시 시작할까요?',
-      detail: '지금까지 뽑은 코인, 선택한 경험, 작성한 답변이 모두 지워집니다.',
+      detail: '지금까지 담은 경험과 작성한 답변이 모두 지워집니다.',
       confirmLabel: '처음부터 다시',
       cancelLabel: '돌아가기',
       action: 'confirm-restart'
@@ -951,40 +831,22 @@ const ACTIONS = {
   'confirm-restart': () => {
     closeModal();
     localStorage.removeItem(STORAGE_KEY);
-    state = { ...initialState };
-    clearTimeout(splashTimer);
-    clearTimeout(revealTimer);
-    splashTimer = null;
+    state = freshState();
     render();
   },
-  'claim-coins': () => {
-    closeModal();
-    if (state.coinsAwarded) return go('shop');
-    state.coins = state.pendingReward ?? 0;
-    state.coinsAwarded = true;
-    go('shop');
-  },
-  'close-reward': () => {
-    const result = document.querySelector('.gacha-result');
-    if (result) result.style.display = 'none';
-  },
   'finish-shop': () => {
-    if (!state.purchased.length) return showNotice('경험을 1개 이상 선택한 뒤 진행해주세요.');
-    if (!state.gift) state.gift = GIFTS[Math.floor(Math.random() * GIFTS.length)];
-    go('mystery');
+    if (!state.purchased.length) return showNotice('경험을 1개 이상 담은 뒤 진행해주세요.');
+    go('type');
   },
-  'open-gift': () => go('mystery', { giftOpened: true }),
-  'confirm-gift': () => go('type'),
   'back-to-shop': () => go('shop'),
-  'back-to-mystery': () => go('mystery'),
-  mystery: () => go('mystery'),
   type: () => go('type'),
   job: () => go('job'),
   'job-next': () => (state.jobId ? go('org') : showNotice('지원 직무를 먼저 선택해주세요.')),
   'back-to-org': () => go('org'),
   'org-next': () => {
     if (!state.organization.trim()) return showNotice('지원할 기업 또는 기관 이름을 입력해주세요.');
-    const questions = state.questions?.length ? state.questions : buildQuestions(state.companyType, state.jobId);
+    // 기업명이 문항에 들어가므로 매번 다시 만든다. 문항 id가 같아 작성한 답변은 유지된다.
+    const questions = buildQuestions(state.companyType, state.jobId, state.organization);
     go('essay', { questionIndex: 0, questions });
   },
   previous: () => state.questionIndex > 0 && go('essay', { questionIndex: state.questionIndex - 1 }),
@@ -993,15 +855,20 @@ const ACTIONS = {
     if (state.questionIndex < questions.length - 1) return go('essay', { questionIndex: state.questionIndex + 1 });
     go('complete');
   },
-  'back-to-essay': () => go('essay', { questionIndex: 0 }),
+  'back-to-essay': () => {
+    const firstEmpty = currentQuestions().findIndex((q) => !(state.answers[q.id] || '').trim());
+    go('essay', { questionIndex: firstEmpty > -1 ? firstEmpty : 0 });
+  },
   'future-resume': () => go('resume'),
   'go-applicant': () => go('applicant'),
   'submit-application': () => {
-    if (applicantErrors().length) return showNotice('제출자 정보를 모두 입력해주세요.');
+    if (applicantErrors().length) return showNotice('제출자 정보를 모두 입력하고 동의에 체크해주세요.');
+    const missing = currentQuestions().filter((q) => !(state.answers[q.id] || '').trim()).length;
+    const missingNote = missing ? `<br><strong class="warn-text">아직 작성하지 않은 문항이 ${missing}개 있습니다.</strong> 이대로 제출하면 PDF에 '미작성'으로 표시됩니다.` : '';
     return confirmDialog({
       eyebrow: 'SUBMIT',
       title: '작성한 지원서를 제출할까요?',
-      detail: `${esc(state.email)} 주소로 사본이 발송됩니다. 제출 후에도 내용을 수정해 다시 제출할 수 있습니다.`,
+      detail: `${esc(state.email)} 주소로 사본이 발송됩니다. 제출 후에도 내용을 수정해 다시 제출할 수 있습니다.${missingNote}`,
       confirmLabel: '제출하기',
       cancelLabel: '돌아가기',
       action: 'confirm-submit'
@@ -1019,16 +886,51 @@ const ACTIONS = {
     closeModal();
     submitByMail();
   },
+  'confirm-change': () => {
+    closeModal();
+    const change = pendingChange;
+    pendingChange = null;
+    if (change?.kind === 'type') applyType(change.value);
+    if (change?.kind === 'job') applyJob(change.value);
+  },
   'view-career': openCareerReview,
-  'close-modal': closeModal
+  'close-modal': () => {
+    pendingChange = null;
+    closeModal();
+  }
 };
+
+function applyType(nextType) {
+  const stillValid = jobsFor(nextType).some((job) => job.id === state.jobId);
+  go('job', { companyType: nextType, jobId: stillValid ? state.jobId : null, questions: null });
+}
+
+function applyJob(jobId) {
+  state.jobId = jobId;
+  state.questions = null;
+  save();
+  rerenderInPlace();
+}
+
+// 이미 답변을 쓴 상태에서 유형·직무를 바꾸면 문항이 달라지므로 한 번 확인한다
+function confirmChange(kind, value) {
+  pendingChange = { kind, value };
+  confirmDialog({
+    eyebrow: 'CHANGE',
+    title: kind === 'type' ? '지원 유형을 바꿀까요?' : '지원 직무를 바꿀까요?',
+    detail: '유형과 직무에 따라 자기소개서 문항이 달라집니다. 지금까지 작성한 답변은 지워지지 않고, 원래 선택으로 돌아오면 다시 보입니다.',
+    confirmLabel: '바꾸기',
+    cancelLabel: '그대로 두기',
+    action: 'confirm-change'
+  });
+}
 
 app.addEventListener('click', (event) => {
   const category = event.target.closest('[data-category]');
   if (category) {
     state.category = category.dataset.category;
     save();
-    render();
+    rerenderInPlace(); // B7
     return;
   }
 
@@ -1037,89 +939,49 @@ app.addEventListener('click', (event) => {
 
   const typeButton = event.target.closest('[data-type]');
   if (typeButton) {
-    const changed = state.companyType !== typeButton.dataset.type;
-    return go('job', {
-      companyType: typeButton.dataset.type,
-      jobId: changed ? null : state.jobId,
-      questions: changed ? null : state.questions
-    });
+    const nextType = typeButton.dataset.type;
+    if (nextType === state.companyType) return go('job');
+    if (answeredIn(state.companyType, state.jobId)) return confirmChange('type', nextType);
+    return applyType(nextType);
   }
 
   const jobButton = event.target.closest('[data-job]');
   if (jobButton) {
-    state.jobId = jobButton.dataset.job;
-    state.questions = null;
+    const nextJob = jobButton.dataset.job;
+    if (nextJob === state.jobId) return;
+    if (answeredIn(state.companyType, state.jobId)) return confirmChange('job', nextJob);
+    return applyJob(nextJob); // B7: 스크롤 위치 유지
+  }
+
+  const toggle = event.target.closest('[data-toggle]');
+  if (toggle) {
+    const id = toggle.dataset.toggle;
+    state.purchased = state.purchased.includes(id)
+      ? state.purchased.filter((item) => item !== id)
+      : [...state.purchased, id];
     save();
-    render();
+    rerenderInPlace(); // 담을 때마다 맨 위로 튀지 않게
     return;
-  }
-
-  const buyButton = event.target.closest('[data-buy]');
-  if (buyButton) {
-    const item = findExperience(buyButton.dataset.buy);
-    if (!item) return;
-    return confirmDialog({
-      eyebrow: 'PURCHASE CHECK',
-      title: `${item[1]}을(를) 구매할까요?`,
-      detail: '구매한 경험은 자기소개서를 쓸 때 활용할 수 있습니다.',
-      cost: `◈ ${item[4]} COINS`,
-      confirmLabel: '구매하기',
-      cancelLabel: '취소',
-      action: 'confirm-purchase',
-      id: item[0]
-    });
-  }
-
-  const increase = event.target.closest('[data-increase]');
-  if (increase) {
-    const item = findExperience(increase.dataset.increase);
-    if (item) buy(item);
-    return;
-  }
-
-  const decrease = event.target.closest('[data-decrease]');
-  if (decrease) {
-    const item = findExperience(decrease.dataset.decrease);
-    if (!item) return;
-    const count = state.purchased.filter((id) => id === item[0]).length;
-    if (count > 1) return refund(item);
-    return confirmDialog({
-      eyebrow: 'CANCEL PURCHASE',
-      title: `${item[1]} 구매를 취소할까요?`,
-      detail: '보유 경험에서 제거되고 코인이 환불됩니다.',
-      cost: `${item[4]} COINS 환불`,
-      confirmLabel: '구매 취소',
-      cancelLabel: '돌아가기',
-      action: 'confirm-refund',
-      id: item[0]
-    });
   }
 
   const button = event.target.closest('button, [data-action]');
   if (!button) return;
   const action = button.dataset.action;
 
-  if (action === 'confirm-purchase') {
-    closeModal();
-    const item = findExperience(button.dataset.id);
-    if (item) buy(item);
-    return;
-  }
-  if (action === 'confirm-refund') {
-    closeModal();
-    const item = findExperience(button.dataset.id);
-    if (item) refund(item);
-    return;
-  }
   if (ACTIONS[action]) ACTIONS[action]();
 });
 
 // 모달 바깥 클릭·ESC로 닫기
+const modalLocked = () => Boolean(document.querySelector('.modal-backdrop.locked'));
 app.addEventListener('click', (event) => {
-  if (event.target.classList.contains('modal-backdrop')) closeModal();
+  if (event.target.classList.contains('modal-backdrop') && !modalLocked()) ACTIONS['close-modal']();
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeModal();
+  if (event.key === 'Escape' && !modalLocked()) ACTIONS['close-modal']();
+  if (state.screen === 'splash' && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault();
+    ACTIONS['skip-splash']();
+  }
 });
 
 render();
